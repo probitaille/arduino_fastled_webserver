@@ -9,6 +9,7 @@
 #include <FastLED.h>
 
 // Load Wi-Fi library
+#include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
@@ -19,7 +20,7 @@
 const char* ssid     = "VIRUS";
 const char* password = "3nd0fW0rld";
 
-#define BRIGHTNESS  50
+//#define BRIGHTNESS  255
 #define LED_PIN     5
 #define COLOR_ORDER GRB
 #define TOTAL_LEDS  150 //150 leds total
@@ -41,13 +42,10 @@ String header;
 
 // Auxiliar variables to store the current output state
 String led_state = "off";
-String lavaWaveState = "off";
 
 // Assign output variables to GPIO pins
 const int output5 = 5;
 const int output4 = 4;
-
-bool blink = false;
 
 // Current time
 unsigned long currentTime = millis();
@@ -56,6 +54,8 @@ unsigned long previousTime = 0;
 // Define timeout time in milliseconds (example: 2000ms = 2s)
 const long timeoutTime = 5000;
 
+//Default Brightness
+uint8_t Brightness = 255;
 
 /**** Rainbow variable ****/
 #define UPDATES_PER_SECOND 100
@@ -80,7 +80,7 @@ void setup()
   /******* Rainbow Setup ******/
     
   FastLED.addLeds<WS2812B, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
-  FastLED.setBrightness(  BRIGHTNESS );
+  FastLED.setBrightness(  Brightness );
 
   currentPalette = RainbowColors_p;
   currentBlending = LINEARBLEND;
@@ -139,6 +139,14 @@ void setup()
 
   webServer.on("/", handleRoot);               // Call the 'handleRoot' function when a client requests URI "/"
 
+  webServer.on("/off", HTTP_GET, []() {
+    Serial.println("Leds turned off");
+    turnOffLeds();
+              
+    String json = "Leds turned off";
+    webServer.send(200, "text/json", json);
+  });
+
   webServer.on("/rainbow", HTTP_GET, []() {
     Serial.println("Rainbow activated");
     led_state = "on";
@@ -155,7 +163,7 @@ void setup()
     currentPalette = LavaColors_p;
     digitalWrite(output5, HIGH);
               
-    String json = "test";
+    String json = "Lava activated";
     webServer.send(200, "text/json", json);
   });
 
@@ -169,6 +177,83 @@ void setup()
     webServer.send(200, "text/json", json);
   });
 
+  webServer.on("/clouds", HTTP_GET, []() {
+    Serial.println("Clouds activated");
+    led_state = "on";
+    currentPalette = CloudColors_p;
+    digitalWrite(output5, HIGH);
+              
+    String json = "Clouds activated";
+    webServer.send(200, "text/json", json);
+  });
+
+  webServer.on("/forest", HTTP_GET, []() {
+    Serial.println("Forest activated");
+    led_state = "on";
+    currentPalette = ForestColors_p;
+    digitalWrite(output5, HIGH);
+              
+    String json = "Forest activated";
+    webServer.send(200, "text/json", json);
+  });
+
+  webServer.on("/party", HTTP_GET, []() {
+    Serial.println("Party activated");
+    led_state = "on";
+    currentPalette = PartyColors_p;
+    digitalWrite(output5, HIGH);
+              
+    String json = "Party activated";
+    webServer.send(200, "text/json", json);
+  });
+
+  webServer.on("/brightness", HTTP_POST, []() {
+
+    Serial.print("Data received: ");
+    String data = webServer.arg("plain");
+    Serial.println(data);
+  
+    const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(3) + 30;
+    DynamicJsonDocument doc(capacity);
+
+    deserializeJson(doc, data);
+
+    uint8_t value = doc["value"];
+    
+    Serial.println(value);
+
+    setBrightness(value);
+          
+    String json = "Brightness set to " + value;
+    webServer.send(200, "text/json", json);
+  });
+
+  webServer.on("/setcolor", HTTP_POST, []() {
+    Serial.print("Data received: ");
+    String data = webServer.arg("plain");
+    Serial.println(data);
+  
+    const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(3) + 30;
+    DynamicJsonDocument doc(capacity);
+
+    deserializeJson(doc, data);
+
+    uint8_t r = doc["r"];
+    uint8_t g = doc["g"];
+    uint8_t b = doc["b"];
+    
+    setColor(r, g, b);
+
+    Serial.println("r = ");
+    Serial.println(r);
+    Serial.println("g = ");
+    Serial.println(g);
+    Serial.println("b = ");
+    Serial.println(b);
+
+    String json = "Color set to (" + String(r) + "," + String(g) + "," + String(b) + ")" ;
+    webServer.send(200, "text/json", json);
+  });
 
 //RainbowColors_p, RainbowStripeColors_p,
 // OceanColors_p, CloudColors_p, LavaColors_p, ForestColors_p, and PartyColors_p.
@@ -182,7 +267,7 @@ void setup()
 }
 
 void handleRoot() {
-  webServer.send(200, "text/plain", "Hello world!");   // Send HTTP status 200 (Ok) and send some text to the browser/client
+  webServer.send(200, "text/plain", "I'm alive!");   // Send HTTP status 200 (Ok) and send some text to the browser/client
 }
 
 void handleNotFound(){
@@ -196,7 +281,7 @@ void loop(){
   /**** ChangePalettePeriodically Script ****/
 
   webServer.handleClient(); // Listen for HTTP requests from clients
-    MDNS.update();
+  MDNS.update();
 
   
   if (led_state=="on") {
@@ -208,198 +293,55 @@ void loop(){
       FillLEDsFromPaletteColors( startIndex);
     
       FastLED.show();
+
+      // insert a delay to keep the framerate modest
       FastLED.delay(1000 / UPDATES_PER_SECOND);
   }
-
-  /*
-  if (lavaWaveState=="on") {
-      static uint8_t startIndex = 0;
-      startIndex = startIndex + 1; // motion speed
-    
-      FillLEDsFromPaletteColors( startIndex);
-
-      FastLED.show();
-      FastLED.delay(1000 / UPDATES_PER_SECOND);
-  }
-  */
-
-  /**** Wifi Script ****/
-
-  /*
-  WiFiClient client = server.available();   // Listen for incoming clients
-  
-  if (client) {                             // If a new client connects,
-    Serial.println("New Client.");          // print a message out in the serial port
-    String currentLine = "";                // make a String to hold incoming data from the client
-    currentTime = millis();
-    previousTime = currentTime;
-    while (client.connected() && currentTime - previousTime <= timeoutTime) { // loop while the client's connected
-      currentTime = millis();         
-      if (client.available()) {             // if there's bytes to read from the client,
-        char c = client.read();             // read a byte, then
-        Serial.write(c);                    // print it out the serial monitor
-        header += c;
-        if (c == '\n') {                    // if the byte is a newline character
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request, so send a response:
-          if (currentLine.length() == 0) {
-            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-            // and a content-type so the client knows what's coming, then a blank line:
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println("Connection: close");
-            client.println();
-
-            turnOffAllStates();
-            
-            // turns the GPIOs on and off
-            if (header.indexOf("GET /rainbow") >= 0) {
-              Serial.println("GPIO 5 on");
-              //changeLedToRed();
-              output5State = "on";
-              currentPalette = RainbowColors_p;
-              digitalWrite(output5, HIGH);
-            } else if (header.indexOf("GET /off") >= 0) {
-              Serial.println("GPIO 5 off");
-              turnOffLeds();
-              digitalWrite(output5, LOW);
-            } else if (header.indexOf("GET /lava") >= 0) {
-              Serial.println("Lava Wave On");
-              lavaWaveState = "on";
-              currentPalette = LavaColors_p;
-              digitalWrite(output5, HIGH);
-            }
-            
-            // Display the HTML web page
-            client.println("<!DOCTYPE html><html>");
-            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-            client.println("<link rel=\"icon\" href=\"data:,\">");
-            // CSS to style the on/off buttons 
-            // Feel free to change the background-color and font-size attributes to fit your preferences
-            client.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
-            client.println(".button { background-color: #195B6A; border: none; color: white; padding: 16px 40px;");
-            client.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}");
-            client.println(".button2 {background-color: #77878A;}</style></head>");
-            
-            // Web Page Heading
-            client.println("<body><h1>ESP8266 Web Server</h1>");
-
-            client.println("<p>Commands:</p>");
-              client.println("<p><a href=\"/off\"><button class=\"button\">Turn OFF</button></a></p>");
-            
-            // If the output5State is off, it displays the ON button       
-            if (output5State=="off") {
-              client.println("<p>Rainbow - <b style='color: gray;'>Deactivated</p>");
-              client.println("<p><a href=\"/rainbow\"><button class=\"button\">Turn rainbow ON</button></a></p>");
-            } else {
-              client.println("<p>Rainbow - <b style='color: green;'>Activated</p>");
-              //client.println("<p><a href=\"/5/off\"><button class=\"button button2\" >Turn rainbow OFF</button></a></p>");
-            } 
-               
-            // Display current state, and ON/OFF buttons for GPIO 4  
-            
-            // If the lavaWaveState is off, it displays the ON button       
-            if (lavaWaveState=="off") {
-              client.println("<p>Lava wave - <b style='color: gray;'>Deactivated</p>");
-              client.println("<p><a href=\"/lava\"><button class=\"button\">Turn Lava wave ON</button></a></p>");
-            } else {
-              // Display current state, and ON/OFF buttons for GPIO 4  
-              client.println("<p>Lava wave - <b style='color: green;'>Activated</p>");
-              //client.println("<p><a href=\"/4/off\"><button class=\"button button2\" >>Turn Lava wave OFF</button></a></p>");
-            }
-            client.println("</body></html>");
-            
-            // The HTTP response ends with another blank line
-            client.println();
-            // Break out of the while loop
-            break;
-          } else { // if you got a newline, then clear currentLine
-            currentLine = "";
-          }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
-        }
-      }
-    }
-    // Clear the header variable
-    header = "";
-    // Close the connection
-    client.stop();
-    Serial.println("Client disconnected.");
-    Serial.println("");
-    //delay(1000); // execute once every 1 sec, don't flood remote service
-
-  } //End if (client) */
   
 }// End Loop
 
-void test()
+void setBrightness(uint8_t value)
 {
-    blink = true;
+  if (value > 255)
+    value = 255;
+  else if (value < 0) value = 0;
 
+  Brightness = value;
+
+  FastLED.setBrightness(Brightness);
+
+  Serial.println("Brightness set to:");
+  Serial.println(Brightness);
 }
 
-void turnOffAllStates()
+
+void setColor(uint8_t r, uint8_t g, uint8_t b)
 {
-  led_state = "off";
-  lavaWaveState = "off";
+  Serial.println("setColor() called");   
+  
+  fill_solid( leds, NUM_LEDS, CRGB(r,g,b));
+  FastLED.show();
+
+  Serial.println("turnOffLeds() finish");   
 }
+
 
 void FillLEDsFromPaletteColors( uint8_t colorIndex)
 {
-  uint8_t brightness = 255;
-
   for ( int i = 0; i < NUM_LEDS; i++) {
-    leds[i] = ColorFromPalette( currentPalette, colorIndex, brightness, currentBlending);
+    leds[i] = ColorFromPalette( currentPalette, colorIndex, Brightness, currentBlending);
     colorIndex += 3;
   }
 }
 
 
-void changeLedToBlue()
-{
-  Serial.println("changeLedToBlue() called");   
-  
-  for (int j = 0; j < NUM_LEDS ; j++)
-  {
-    // clear this led for the next time around the loop
-    leds[j] = CRGB(0,0,255);
-    FastLED.show();
-    
-  }
-}
-
-void changeLedToRed()
-{
-  Serial.println("changeLedToRed() called");   
-  
-  for (int j = 0; j < NUM_LEDS ; j++)
-  {
-    // clear this led for the next time around the loop
-    leds[j] = CRGB::Red;
-    FastLED.show();
-  }
-}
-
 void turnOffLeds()
 {
   Serial.println("turnOffLeds() called");   
   led_state = "off";
-  lavaWaveState = "off";
   
-  blink = false;
-
   fill_solid( leds, NUM_LEDS, CRGB(0,0,0));
   FastLED.show();
-
-  /*
-  for (int j = 0; j < NUM_LEDS ; j++)
-  {
-    // clear this led for the next time around the loop
-    leds[j] = CRGB::Black;
-    FastLED.show();
-    FastLED.delay(1000 / UPDATES_PER_SECOND);
-  }*/
 
   Serial.println("turnOffLeds() finish");   
 }
