@@ -10,6 +10,10 @@
 
 // Load Wi-Fi library
 #include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
+#include <ESP8266HTTPUpdateServer.h>
+
 
 // Replace with your network credentials
 const char* ssid     = "VIRUS";
@@ -28,11 +32,15 @@ CRGB  leds[TOTAL_LEDS];
 // Set web server port number to 80
 WiFiServer server(80);
 
+ESP8266WebServer webServer(80); // Create a webserver object that listens for HTTP request on port 80
+ESP8266HTTPUpdateServer httpUpdateServer;
+
+
 // Variable to store the HTTP request
 String header;
 
 // Auxiliar variables to store the current output state
-String output5State = "off";
+String led_state = "off";
 String lavaWaveState = "off";
 
 // Assign output variables to GPIO pins
@@ -101,7 +109,8 @@ void setup()
   }
   // Print local IP address and start web server
   Serial.println("");
-  Serial.println("WiFi connected.");
+  Serial.println("WiFi connected to:");
+  Serial.println(WiFi.SSID());              // Tell us what network we're connected to
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 
@@ -115,12 +124,70 @@ void setup()
   Serial.print( F("Flash Size: ") ); Serial.println(ESP.getFlashChipRealSize());
   Serial.print( F("Vcc: ") ); Serial.println(ESP.getVcc());
   Serial.println();
+
   
-  server.begin();
+  if (MDNS.begin("esp8266")) {              // Start the mDNS responder for esp8266.local
+    Serial.println("mDNS responder started");
+  } else {
+    Serial.println("Error setting up MDNS responder!");
+  }
+  MDNS.addService("http", "tcp", 80);
 
 
 
+  httpUpdateServer.setup(&webServer);
 
+  webServer.on("/", handleRoot);               // Call the 'handleRoot' function when a client requests URI "/"
+
+  webServer.on("/rainbow", HTTP_GET, []() {
+    Serial.println("Rainbow activated");
+    led_state = "on";
+    currentPalette = RainbowColors_p;
+    digitalWrite(output5, HIGH);
+              
+    String json = "Rainbow activated";
+    webServer.send(200, "text/json", json);
+  });
+  
+  webServer.on("/lava", HTTP_GET, []() {
+    Serial.println("Lava activated");
+    led_state = "on";
+    currentPalette = LavaColors_p;
+    digitalWrite(output5, HIGH);
+              
+    String json = "test";
+    webServer.send(200, "text/json", json);
+  });
+
+  webServer.on("/ocean", HTTP_GET, []() {
+    Serial.println("Ocean activated");
+    led_state = "on";
+    currentPalette = OceanColors_p;
+    digitalWrite(output5, HIGH);
+              
+    String json = "test";
+    webServer.send(200, "text/json", json);
+  });
+
+
+//RainbowColors_p, RainbowStripeColors_p,
+// OceanColors_p, CloudColors_p, LavaColors_p, ForestColors_p, and PartyColors_p.
+
+  webServer.onNotFound(handleNotFound);        // When a client requests an unknown URI (i.e. something other than "/"), call function "handleNotFound"
+
+  webServer.begin();                           // Actually start the server
+  Serial.println("HTTP server started");
+  
+  Serial.println("Setup Done!");
+}
+
+void handleRoot() {
+  webServer.send(200, "text/plain", "Hello world!");   // Send HTTP status 200 (Ok) and send some text to the browser/client
+}
+
+void handleNotFound(){
+   Serial.println("handleNotFound");
+  webServer.send(404, "text/plain", "404: Not found"); // Send HTTP status 404 (Not Found) when there's no handler for the URI in the request
 }
 
 
@@ -128,8 +195,11 @@ void loop(){
 
   /**** ChangePalettePeriodically Script ****/
 
+  webServer.handleClient(); // Listen for HTTP requests from clients
+    MDNS.update();
+
   
-  if (output5State=="on") {
+  if (led_state=="on") {
       //ChangePalettePeriodically();
     
       static uint8_t startIndex = 0;
@@ -141,6 +211,7 @@ void loop(){
       FastLED.delay(1000 / UPDATES_PER_SECOND);
   }
 
+  /*
   if (lavaWaveState=="on") {
       static uint8_t startIndex = 0;
       startIndex = startIndex + 1; // motion speed
@@ -150,11 +221,11 @@ void loop(){
       FastLED.show();
       FastLED.delay(1000 / UPDATES_PER_SECOND);
   }
-  
+  */
 
   /**** Wifi Script ****/
 
-  
+  /*
   WiFiClient client = server.available();   // Listen for incoming clients
   
   if (client) {                             // If a new client connects,
@@ -258,8 +329,9 @@ void loop(){
     Serial.println("");
     //delay(1000); // execute once every 1 sec, don't flood remote service
 
-  }
-}
+  } //End if (client) */
+  
+}// End Loop
 
 void test()
 {
@@ -269,7 +341,7 @@ void test()
 
 void turnOffAllStates()
 {
-  output5State = "off";
+  led_state = "off";
   lavaWaveState = "off";
 }
 
@@ -312,7 +384,7 @@ void changeLedToRed()
 void turnOffLeds()
 {
   Serial.println("turnOffLeds() called");   
-  output5State = "off";
+  led_state = "off";
   lavaWaveState = "off";
   
   blink = false;
