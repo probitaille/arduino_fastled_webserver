@@ -4,7 +4,8 @@
 *********/
 //#define FASTLED_ESP8266_NODEMCU_PIN_ORDER
 #define FASTLED_ESP8266_RAW_PIN_ORDER
-#define FASTLED_ALLOW_INTERRUPTS 0
+//#define FASTLED_ALLOW_INTERRUPTS 0
+#define FASTLED_INTERRUPT_RETRY_COUNT 1 //See: https://github.com/FastLED/FastLED/wiki/Interrupt-problems
 
 #include <FastLED.h>
 
@@ -23,11 +24,10 @@ const char* password = "3nd0fW0rld";
 //#define BRIGHTNESS  255
 #define LED_PIN     5
 #define COLOR_ORDER GRB
-#define TOTAL_LEDS  150 //150 leds total
-#define NUM_LEDS    150 //150 leds totalCRGB  leds[TOTAL_LEDS];
+#define NUM_LEDS    150 //150 leds total
 
 // Array of leds
-CRGB  leds[TOTAL_LEDS];
+CRGB  leds[NUM_LEDS];
 
 /****** Wifi server variables ******/
 // Set web server port number to 80
@@ -41,7 +41,9 @@ ESP8266HTTPUpdateServer httpUpdateServer;
 String header;
 
 // Auxiliar variables to store the current output state
-String led_state = "off";
+String animation_state = "off";
+bool is_changing_state = false;
+
 
 // Assign output variables to GPIO pins
 const int output5 = 5;
@@ -52,7 +54,7 @@ unsigned long currentTime = millis();
 // Previous time
 unsigned long previousTime = 0; 
 // Define timeout time in milliseconds (example: 2000ms = 2s)
-const long timeoutTime = 5000;
+const long timeoutTime = 500;
 
 //Default Brightness
 uint8_t Brightness = 255;
@@ -77,18 +79,13 @@ void setup()
 {
   delay( 500 ); // power-up safety delay
 
-  /******* Rainbow Setup ******/
+    /******* LED Init ******/
     
   FastLED.addLeds<WS2812B, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
   FastLED.setBrightness(  Brightness );
 
   currentPalette = RainbowColors_p;
   currentBlending = LINEARBLEND;
-  
-  /******* LED Init ******/
-  // put your setup code here, to run once:
-  //FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, TOTAL_LEDS);
-
 
   /******* Wifi Setup ******/
   Serial.begin(115200);
@@ -126,12 +123,20 @@ void setup()
   Serial.println();
 
   
-  if (MDNS.begin("esp8266")) {              // Start the mDNS responder for esp8266.local
-    Serial.println("mDNS responder started");
-  } else {
+  // Set up mDNS responder:
+  // - first argument is the domain name, in this example
+  //   the fully-qualified domain name is "esp8266.local"
+  // - second argument is the IP address to advertise
+  //   we send our IP address on the WiFi network
+  if (!MDNS.begin("esp8266")) {
     Serial.println("Error setting up MDNS responder!");
+    while (1) {
+      delay(1000);
+    }
   }
-  MDNS.addService("http", "tcp", 80);
+  Serial.println("mDNS responder started");
+  
+ 
 
 
 
@@ -149,62 +154,32 @@ void setup()
 
   webServer.on("/rainbow", HTTP_GET, []() {
     Serial.println("Rainbow activated");
-    led_state = "on";
-    currentPalette = RainbowColors_p;
-    digitalWrite(output5, HIGH);
-              
-    String json = "Rainbow activated";
-    webServer.send(200, "text/json", json);
+    changePalette(RainbowColors_p, "Rainbow activated");
   });
   
   webServer.on("/lava", HTTP_GET, []() {
     Serial.println("Lava activated");
-    led_state = "on";
-    currentPalette = LavaColors_p;
-    digitalWrite(output5, HIGH);
-              
-    String json = "Lava activated";
-    webServer.send(200, "text/json", json);
+    changePalette(LavaColors_p, "Lava activated");
   });
 
   webServer.on("/ocean", HTTP_GET, []() {
     Serial.println("Ocean activated");
-    led_state = "on";
-    currentPalette = OceanColors_p;
-    digitalWrite(output5, HIGH);
-              
-    String json = "test";
-    webServer.send(200, "text/json", json);
+    changePalette(OceanColors_p, "Ocean activated");
   });
 
   webServer.on("/clouds", HTTP_GET, []() {
     Serial.println("Clouds activated");
-    led_state = "on";
-    currentPalette = CloudColors_p;
-    digitalWrite(output5, HIGH);
-              
-    String json = "Clouds activated";
-    webServer.send(200, "text/json", json);
+    changePalette(CloudColors_p, "Clouds activated");
   });
 
   webServer.on("/forest", HTTP_GET, []() {
     Serial.println("Forest activated");
-    led_state = "on";
-    currentPalette = ForestColors_p;
-    digitalWrite(output5, HIGH);
-              
-    String json = "Forest activated";
-    webServer.send(200, "text/json", json);
+    changePalette(ForestColors_p, "Forest activated");
   });
 
   webServer.on("/party", HTTP_GET, []() {
     Serial.println("Party activated");
-    led_state = "on";
-    currentPalette = PartyColors_p;
-    digitalWrite(output5, HIGH);
-              
-    String json = "Party activated";
-    webServer.send(200, "text/json", json);
+    changePalette(PartyColors_p, "Party activated");
   });
 
   webServer.on("/brightness", HTTP_POST, []() {
@@ -236,6 +211,8 @@ void setup()
     const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(3) + 30;
     DynamicJsonDocument doc(capacity);
 
+    animation_state = "off";
+
     deserializeJson(doc, data);
 
     uint8_t r = doc["r"];
@@ -259,9 +236,13 @@ void setup()
 // OceanColors_p, CloudColors_p, LavaColors_p, ForestColors_p, and PartyColors_p.
 
   webServer.onNotFound(handleNotFound);        // When a client requests an unknown URI (i.e. something other than "/"), call function "handleNotFound"
-
   webServer.begin();                           // Actually start the server
+
+  
   Serial.println("HTTP server started");
+
+  // Add service to MDNS-SD
+  MDNS.addService("http", "tcp", 80);
   
   Serial.println("Setup Done!");
 }
@@ -278,26 +259,68 @@ void handleNotFound(){
 
 void loop(){
 
+  MDNS.update();
+  
+
   /**** ChangePalettePeriodically Script ****/
 
   webServer.handleClient(); // Listen for HTTP requests from clients
-  MDNS.update();
+
+  unsigned long currentTime = millis(); // refresh counter variable
 
   
-  if (led_state=="on") {
+  
+  if (animation_state=="on") {
       //ChangePalettePeriodically();
-    
-      static uint8_t startIndex = 0;
-      startIndex = startIndex + 1; // motion speed
-    
-      FillLEDsFromPaletteColors( startIndex);
-    
-      FastLED.show();
 
-      // insert a delay to keep the framerate modest
-      FastLED.delay(1000 / UPDATES_PER_SECOND);
-  }
+      if(currentTime - previousTime > 10 )
+      {
+        previousTime = millis();
+        
+        static uint8_t startIndex = 0;
+        startIndex = startIndex + 1; // motion speed
   
+        
+        FillLEDsFromPaletteColors( startIndex);
+      
+        FastLED.show();
+        
+        // insert a delay to keep the framerate modest
+        //FastLED.delay(1000 / UPDATES_PER_SECOND);
+      }
+     
+      /*
+      Serial.println( "FreeHeap:" );
+      Serial.println( ESP.getFreeHeap() );
+      Serial.println( "HeapFragmentation:" );
+      Serial.println( ESP.getHeapFragmentation() );
+      Serial.println( "MaxFreeBlockSize:" );
+      Serial.println( ESP.getMaxFreeBlockSize() );
+      */
+  }
+  /*
+  if(currentTime - previousTime > 1000)
+  {
+      previousTime = millis();
+      
+      Serial.println( "FreeHeap:" );
+      Serial.println( ESP.getFreeHeap() );
+      Serial.println( "HeapFragmentation:" );
+      Serial.println( ESP.getHeapFragmentation() );
+      Serial.println( "MaxFreeBlockSize:" );
+      Serial.println( ESP.getMaxFreeBlockSize() );
+    
+  }*/
+
+  if( is_changing_state == true ) {
+    //if(currentTime - previousTime > timeoutTime)
+    //{
+    //  previousTime = millis();
+      
+      is_changing_state = false;
+      Serial.println("is_changing_state set to false");
+    //}
+  } 
 }// End Loop
 
 void setBrightness(uint8_t value)
@@ -325,6 +348,25 @@ void setColor(uint8_t r, uint8_t g, uint8_t b)
   Serial.println("turnOffLeds() finish");   
 }
 
+void changePalette(CRGBPalette16 new_palette, String success_msg)
+{
+  //Change only if it's not currently in changing state 
+  if(is_changing_state == false)
+  {
+    animation_state = "on";
+    is_changing_state = true;
+    currentPalette = new_palette;
+    digitalWrite(output5, HIGH);
+              
+    String json = success_msg;
+    webServer.send(200, "text/json", json);
+  }
+  else
+  {
+    Serial.println("Cant change palette, alreay in changing state mode...");
+  }
+}
+
 
 void FillLEDsFromPaletteColors( uint8_t colorIndex)
 {
@@ -338,7 +380,7 @@ void FillLEDsFromPaletteColors( uint8_t colorIndex)
 void turnOffLeds()
 {
   Serial.println("turnOffLeds() called");   
-  led_state = "off";
+  animation_state = "off";
   
   fill_solid( leds, NUM_LEDS, CRGB(0,0,0));
   FastLED.show();
