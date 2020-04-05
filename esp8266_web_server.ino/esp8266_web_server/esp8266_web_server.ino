@@ -11,15 +11,17 @@
 
 // Load Wi-Fi library
 #include <ArduinoJson.h>
-#include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266HTTPUpdateServer.h>
+#include <WiFiUdp.h>
 
 
 // Replace with your network credentials
 const char* ssid     = "VIRUS";
 const char* password = "3nd0fW0rld";
+
+byte mac[6]; // the MAC address of your Wifi shield
 
 //#define BRIGHTNESS  255
 #define LED_PIN     5
@@ -31,19 +33,18 @@ CRGB  leds[NUM_LEDS];
 
 /****** Wifi server variables ******/
 // Set web server port number to 80
-WiFiServer server(80);
-
 ESP8266WebServer webServer(80); // Create a webserver object that listens for HTTP request on port 80
 ESP8266HTTPUpdateServer httpUpdateServer;
 
-
-// Variable to store the HTTP request
-String header;
+//Setup for UDP
+char packetBuffer[255]; //buffer to hold incoming packet
+char  ReplyBuffer[] = "acknowledged";       // a string to send back
+unsigned int localPort = 2390;      // local port to listen on
+WiFiUDP Udp;
 
 // Auxiliar variables to store the current output state
 String animation_state = "off";
 bool is_changing_state = false;
-
 
 // Assign output variables to GPIO pins
 const int output5 = 5;
@@ -100,6 +101,7 @@ void setup()
   Serial.print("Connecting to ");
   Serial.println(ssid);
   WiFi.begin(ssid, password);
+  WiFi.hostname("led_strip_esp8266");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -232,9 +234,6 @@ void setup()
     webServer.send(200, "text/json", json);
   });
 
-//RainbowColors_p, RainbowStripeColors_p,
-// OceanColors_p, CloudColors_p, LavaColors_p, ForestColors_p, and PartyColors_p.
-
   webServer.onNotFound(handleNotFound);        // When a client requests an unknown URI (i.e. something other than "/"), call function "handleNotFound"
   webServer.begin();                           // Actually start the server
 
@@ -243,6 +242,8 @@ void setup()
 
   // Add service to MDNS-SD
   MDNS.addService("http", "tcp", 80);
+
+  Udp.begin(localPort);
   
   Serial.println("Setup Done!");
 }
@@ -260,19 +261,11 @@ void handleNotFound(){
 void loop(){
 
   MDNS.update();
-  
-
-  /**** ChangePalettePeriodically Script ****/
-
   webServer.handleClient(); // Listen for HTTP requests from clients
 
   unsigned long currentTime = millis(); // refresh counter variable
-
-  
   
   if (animation_state=="on") {
-      //ChangePalettePeriodically();
-
       if(currentTime - previousTime > 10 )
       {
         previousTime = millis();
@@ -288,39 +281,87 @@ void loop(){
         // insert a delay to keep the framerate modest
         //FastLED.delay(1000 / UPDATES_PER_SECOND);
       }
-     
-      /*
-      Serial.println( "FreeHeap:" );
-      Serial.println( ESP.getFreeHeap() );
-      Serial.println( "HeapFragmentation:" );
-      Serial.println( ESP.getHeapFragmentation() );
-      Serial.println( "MaxFreeBlockSize:" );
-      Serial.println( ESP.getMaxFreeBlockSize() );
-      */
   }
-  /*
-  if(currentTime - previousTime > 1000)
-  {
-      previousTime = millis();
-      
-      Serial.println( "FreeHeap:" );
-      Serial.println( ESP.getFreeHeap() );
-      Serial.println( "HeapFragmentation:" );
-      Serial.println( ESP.getHeapFragmentation() );
-      Serial.println( "MaxFreeBlockSize:" );
-      Serial.println( ESP.getMaxFreeBlockSize() );
-    
-  }*/
 
   if( is_changing_state == true ) {
-    //if(currentTime - previousTime > timeoutTime)
-    //{
-    //  previousTime = millis();
-      
       is_changing_state = false;
       Serial.println("is_changing_state set to false");
-    //}
   } 
+
+    // if there's data available, read a packet
+  int packetSize = Udp.parsePacket();
+  if (packetSize) {
+    Serial.print("Received packet of size ");
+    Serial.println(packetSize);
+    Serial.print("From ");
+    IPAddress remoteIp = Udp.remoteIP();
+    Serial.print(remoteIp);
+    Serial.print(", port ");
+    Serial.println(Udp.remotePort());
+
+    // read the packet into packetBufffer
+    int len = Udp.read(packetBuffer, 255);
+    if (len > 0) {
+      packetBuffer[len] = 0;
+    }
+    Serial.println("Contents:");
+    Serial.println(packetBuffer);
+
+    const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(3) + 30;
+    DynamicJsonDocument doc(capacity);
+
+    deserializeJson(doc, packetBuffer);
+
+    bool prop1 = doc["Prop1"];
+    uint8_t prop2 = doc["Prop2"];
+    float prop4 = doc["Prop4"];
+    String prop5 = doc["Prop5"];
+
+    Serial.println("prop1:");
+    Serial.println(prop1);
+    Serial.println("prop2:");
+    Serial.println(prop2);
+    Serial.println("prop4:");
+    Serial.println(prop4);
+    Serial.println("prop5:");
+    Serial.println(prop5);
+
+    DynamicJsonDocument doc2(capacity);
+    
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+
+    
+    WiFi.macAddress(mac);
+    String str_mac = mac2String(mac);
+    doc2["ip_address"] = WiFi.localIP().toString();
+    doc2["mac_address"] = str_mac;
+    serializeJson(doc2, Udp);
+    
+    
+    // send a reply, to the IP address and port that sent us the packet we received
+    //Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
+    int remotePort = 2391;
+    Udp.beginPacket(Udp.remoteIP(), remotePort);
+    //Udp.write(ReplyBuffer);
+    Udp.println();
+    Udp.endPacket();
+
+    //WiFi.macAddress(mac);
+    Serial.print("MAC: ");
+    Serial.print(mac[0],HEX);
+    Serial.print(":");
+    Serial.print(mac[1],HEX);
+    Serial.print(":");
+    Serial.print(mac[2],HEX);
+    Serial.print(":");
+    Serial.print(mac[3],HEX);
+    Serial.print(":");
+    Serial.print(mac[4],HEX);
+    Serial.print(":");
+    Serial.println(mac[5],HEX);
+  }
+  
 }// End Loop
 
 void setBrightness(uint8_t value)
@@ -478,3 +519,17 @@ const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM =
   CRGB::Black,
   CRGB::Black
 };
+
+
+//Convert mac address array to string
+String mac2String(byte ar[]){
+  String s;
+  for (byte i = 0; i < 6; ++i)
+  {
+    char buf[3];
+    sprintf(buf, "%2X", ar[i]);
+    s += buf;
+    if (i < 5) s += ':';
+  }
+  return s;
+}
