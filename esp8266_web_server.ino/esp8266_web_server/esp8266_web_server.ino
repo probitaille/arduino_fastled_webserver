@@ -39,7 +39,8 @@ ESP8266HTTPUpdateServer httpUpdateServer;
 //Setup for UDP
 char packetBuffer[255]; //buffer to hold incoming packet
 char  ReplyBuffer[] = "acknowledged";       // a string to send back
-unsigned int localPort = 2390;      // local port to listen on
+unsigned int listeningPort = 5550;      // local port to listen on
+unsigned int replyPort = 5551;      // local port to listen on
 WiFiUDP Udp;
 
 // Auxiliar variables to store the current output state
@@ -114,6 +115,8 @@ void setup()
   Serial.println(WiFi.localIP());
 
   Serial.println();
+  Serial.print( "Listening Port"); Serial.println(listeningPort);
+  Serial.print( "Reply Port"); Serial.println(replyPort);
   Serial.print( F("Heap: ") ); Serial.println(system_get_free_heap_size());
   Serial.print( F("Boot Vers: ") ); Serial.println(system_get_boot_version());
   Serial.print( F("CPU: ") ); Serial.println(system_get_cpu_freq());
@@ -243,7 +246,7 @@ void setup()
   // Add service to MDNS-SD
   MDNS.addService("http", "tcp", 80);
 
-  Udp.begin(localPort);
+  Udp.begin(listeningPort);
   
   Serial.println("Setup Done!");
 }
@@ -341,8 +344,8 @@ void loop(){
     
     // send a reply, to the IP address and port that sent us the packet we received
     //Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-    int remotePort = 2391;
-    Udp.beginPacket(Udp.remoteIP(), remotePort);
+    //int remotePort = 60124;
+    Udp.beginPacket(Udp.remoteIP(), replyPort);
     //Udp.write(ReplyBuffer);
     Udp.println();
     Udp.endPacket();
