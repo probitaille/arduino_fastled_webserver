@@ -46,6 +46,10 @@ WiFiUDP Udp;
 // Auxiliar variables to store the current output state
 String animation_state = "off";
 bool is_changing_state = false;
+bool is_on = false;
+uint8_t r_color = 0;
+uint8_t g_color = 0;
+uint8_t b_color = 0;
 
 // Assign output variables to GPIO pins
 const int output5 = 5;
@@ -237,6 +241,32 @@ void setup()
     webServer.send(200, "text/json", json);
   });
 
+  webServer.on("/getstate", HTTP_POST, []() {
+    Serial.print("/getstate called");
+    
+    const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(3) + 30;
+    DynamicJsonDocument doc(capacity);
+
+    doc["is_on"] = is_on;
+    doc["brightness"] = Brightness;
+    doc["is_animation_state"] = animation_state;
+    doc["r_color"] = r_color;
+    doc["g_color"] = g_color;
+    doc["b_color"] = b_color;
+
+    // Declare a buffer to hold the result
+    char output[128];
+    
+    serializeJson(doc, output);
+
+    
+    Serial.print(output);
+    
+
+    webServer.send(200, "text/json", output);
+
+  });
+
   webServer.onNotFound(handleNotFound);        // When a client requests an unknown URI (i.e. something other than "/"), call function "handleNotFound"
   webServer.begin();                           // Actually start the server
 
@@ -256,7 +286,7 @@ void handleRoot() {
 }
 
 void handleNotFound(){
-   Serial.println("handleNotFound");
+  Serial.println("handleNotFound for this URL request");
   webServer.send(404, "text/plain", "404: Not found"); // Send HTTP status 404 (Not Found) when there's no handler for the URI in the request
 }
 
@@ -389,6 +419,17 @@ void setColor(uint8_t r, uint8_t g, uint8_t b)
   fill_solid( leds, NUM_LEDS, CRGB(r,g,b));
   FastLED.show();
 
+  is_on = true;
+
+  if(r !=0 or g !=0 or b != 0)
+  {
+    //Save the current only if its not black = 0
+    r_color = r;
+    g_color = g;
+    b_color = b;
+  }
+
+
   Serial.println("turnOffLeds() finish");   
 }
 
@@ -401,6 +442,8 @@ void changePalette(CRGBPalette16 new_palette, String success_msg)
     is_changing_state = true;
     currentPalette = new_palette;
     digitalWrite(output5, HIGH);
+
+    is_on = true;
               
     String json = success_msg;
     webServer.send(200, "text/json", json);
@@ -425,6 +468,7 @@ void turnOffLeds()
 {
   Serial.println("turnOffLeds() called");   
   animation_state = "off";
+  is_on = false;
   
   fill_solid( leds, NUM_LEDS, CRGB(0,0,0));
   FastLED.show();
